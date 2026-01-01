@@ -1,0 +1,209 @@
+# Generated from: Intellimate.ipynb
+# Converted at: 2026-01-01T10:11:07.526Z
+# Next step (optional): refactor into modules & generate tests with RunCell
+# Quick start: pip install runcell
+import sys
+sys.stdout.reconfigure(encoding='utf-8')
+
+import pygame
+from gtts import gTTS
+import os
+import uuid
+import time
+import threading
+import datetime
+import pytz
+import requests
+import random
+import re
+import tkinter as tk
+from tkinter import messagebox, Canvas
+
+# ================= CONFIG =================
+DEFAULT_CITY = "Shirpur"
+API_KEY = "4e8977299ab080a920da27217a9bba54"
+# =========================================
+
+# Initialize pygame mixer
+pygame.mixer.init()
+
+# ================= SPEAK FUNCTION =================
+def speak(text):
+    try:
+        # Stop & unload any current audio
+        pygame.mixer.music.stop()
+        pygame.mixer.music.unload()
+    except:
+        pass
+
+    # Create unique temp audio file
+    filename = f"intelli_{uuid.uuid4().hex}.mp3"
+
+    # Generate speech
+    tts = gTTS(text)
+    tts.save(filename)
+
+    # Play audio
+    pygame.mixer.music.load(filename)
+    pygame.mixer.music.play()
+
+    print(" IntelliMate:", text)
+
+    # Auto cleanup audio file
+    def cleanup(file):
+        time.sleep(2)
+        try:
+            os.remove(file)
+        except:
+            pass
+
+    threading.Thread(target=cleanup, args=(filename,), daemon=True).start()
+
+
+# ================= CORE FUNCTIONS =================
+def get_time():
+    now = datetime.datetime.now(pytz.timezone("Asia/Kolkata"))
+    return f"The current time is {now.strftime('%I:%M %p')}."
+
+def tell_joke():
+    jokes = [
+        "There are 10 types of people: those who understand binary and those who don’t.",
+        "Why do programmers hate nature? It has too many bugs.",
+        "I told my computer I needed a break, and now it won’t stop sending me KitKat ads."
+    ]
+    return random.choice(jokes)
+
+def get_weather(city=DEFAULT_CITY):
+    try:
+        url = f"http://api.openweathermap.org/data/2.5/weather?q={city}&appid={API_KEY}&units=metric"
+        res = requests.get(url).json()
+        if res.get("cod") == 200:
+            temp = res["main"]["temp"]
+            desc = res["weather"][0]["description"]
+            return f"The temperature in {city} is {temp}°C with {desc}."
+        else:
+            return "Sorry, I couldn't fetch the weather."
+    except:
+        return "Weather service error."
+
+def web_search(query):
+    url = f"https://api.duckduckgo.com/?q={query}&format=json&no_redirect=1&no_html=1"
+    try:
+        res = requests.get(url).json()
+        text = ""
+
+        if res.get("AbstractText"):
+            text = res["AbstractText"]
+        elif res.get("RelatedTopics"):
+            text = res["RelatedTopics"][0].get("Text", "")
+        else:
+            return "Sorry, I couldn’t find a short answer."
+
+        sentences = re.split(r'(?<=[.!?]) +', text.strip())
+        summary = " ".join(sentences[:2])
+        return " ".join(summary.split()[:45])
+    except:
+        return "Search failed due to network issue."
+
+
+# ================= COMMAND PROCESSOR =================
+def process_command(cmd):
+    cmd = cmd.lower()
+
+    if "time" in cmd:
+        return get_time()
+
+    elif "joke" in cmd:
+        return tell_joke()
+
+    elif "weather" in cmd:
+        city = cmd.split("in")[-1].strip() if "in" in cmd else DEFAULT_CITY
+        return get_weather(city)
+
+    elif "search" in cmd:
+        query = cmd.replace("search", "").strip()
+        return web_search(query)
+
+    elif "exit" in cmd or "goodbye" in cmd:
+        pygame.mixer.music.stop()
+        return "Goodbye Team! IntelliMate signing off."
+
+    else:
+        return "Try commands like time, joke, weather in Delhi, or search Python."
+
+
+def get_greeting():
+    hour = datetime.datetime.now(pytz.timezone("Asia/Kolkata")).hour
+    if 5 <= hour < 12:
+        return "Good morning"
+    elif 12 <= hour < 18:
+        return "Good afternoon"
+    else:
+        return "Good evening"
+
+
+# ================= TKINTER GUI =================
+def run_gui():
+    root = tk.Tk()
+    root.title(" IntelliMate AI Assistant")
+    root.geometry("600x520")
+    root.configure(bg="#e9eef5")
+
+    greeting = f"{get_greeting()}, Team! I am IntelliMate. How can I help you?"
+    speak(greeting)
+
+    # Chat Area
+    chat_frame = tk.Frame(root, bg="#e9eef5")
+    chat_frame.pack(fill="both", expand=True)
+
+    canvas = Canvas(chat_frame, bg="#ffffff")
+    canvas.pack(side="left", fill="both", expand=True)
+
+    scrollbar = tk.Scrollbar(chat_frame, command=canvas.yview)
+    scrollbar.pack(side="right", fill="y")
+    canvas.configure(yscrollcommand=scrollbar.set)
+
+    messages = tk.Frame(canvas, bg="#ffffff")
+    canvas.create_window((0, 0), window=messages, anchor="nw")
+
+    def on_configure(event):
+        canvas.configure(scrollregion=canvas.bbox("all"))
+
+    messages.bind("<Configure>", on_configure)
+
+    def add_message(text, sender):
+        bg = "#d1e7ff" if sender == "user" else "#e1f5e1"
+        label = tk.Label(
+            messages, text=text, bg=bg, wraplength=450,
+            font=("Segoe UI", 11), justify="left", padx=10, pady=6
+        )
+        label.pack(anchor="e" if sender == "user" else "w", pady=4, padx=10)
+
+    add_message(greeting, "bot")
+
+    # Input
+    entry = tk.Entry(root, font=("Segoe UI", 12))
+    entry.pack(fill="x", padx=10, pady=8)
+
+    def send():
+        cmd = entry.get().strip()
+        if not cmd:
+            return
+        entry.delete(0, tk.END)
+
+        add_message(cmd, "user")
+        response = process_command(cmd)
+        speak(response)
+        add_message(response, "bot")
+
+        if "goodbye" in response.lower():
+            messagebox.showinfo("Session Ended", "Goodbye Team!")
+            root.destroy()
+
+    entry.bind("<Return>", lambda e: send())
+
+    root.mainloop()
+
+
+# ================= RUN =================
+run_gui()
